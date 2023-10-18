@@ -18,18 +18,37 @@
 package org.apache.rocketmq.spring.config;
 
 import org.apache.rocketmq.remoting.RPCHook;
+import org.apache.rocketmq.spring.annotation.RocketMQTransactionListener;
 import org.apache.rocketmq.spring.core.RocketMQLocalTransactionListener;
 import org.springframework.beans.factory.BeanFactory;
 
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-
+/**
+ * 解析 {@link org.apache.rocketmq.spring.annotation.RocketMQTransactionListener} 注解后，封装的对象
+ */
 class TransactionHandler {
+    /**
+     * {@link RocketMQTransactionListener#txProducerGroup()}
+     */
     private String name;
+    /**
+     * Bean 的名字
+     */
     private String beanName;
+    /**
+     * 对应的 RocketMQLocalTransactionListener 对象
+     */
     private RocketMQLocalTransactionListener bean;
     private BeanFactory beanFactory;
+    /**
+     * {@link RocketMQTransactionListener#corePoolSize()}
+     * {@link RocketMQTransactionListener#maximumPoolSize()}
+     * {@link RocketMQTransactionListener#maximumPoolSize()}
+     * {@link RocketMQTransactionListener#keepAliveTime()}
+     * {@link RocketMQTransactionListener#blockingQueueSize()}
+     */
     private ThreadPoolExecutor checkExecutor;
     private RPCHook rpcHook;
 
@@ -74,6 +93,7 @@ class TransactionHandler {
     }
 
     public void setCheckExecutor(int corePoolSize, int maxPoolSize, long keepAliveTime, int blockingQueueSize) {
+        // 创建 ThreadPoolExecutor 对象
         this.checkExecutor = new ThreadPoolExecutor(corePoolSize, maxPoolSize,
             keepAliveTime, TimeUnit.MILLISECONDS,
             new LinkedBlockingDeque<>(blockingQueueSize));

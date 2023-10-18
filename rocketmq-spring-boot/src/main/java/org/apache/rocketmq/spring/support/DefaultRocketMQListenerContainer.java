@@ -83,10 +83,23 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
 
     private RocketMQMessageListener rocketMQMessageListener;
 
+
+    /**
+     * DefaultMQPushConsumer 对象。
+     *
+     * 在 {@link #initRocketMQPushConsumer()} 方法中，进行创建
+     */
     private DefaultMQPushConsumer consumer;
 
+
+    /**
+     * 消息类型
+     */
     private Class messageType;
 
+    /**
+     * 是否在运行中
+     */
     private boolean running;
 
     // The following properties came from @RocketMQMessageListener.
@@ -209,14 +222,16 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
 
     @Override
     public void destroy() {
+        // 标记已经停止
         this.setRunning(false);
+        // 关闭 DefaultMQPushConsumer
         if (Objects.nonNull(consumer)) {
             consumer.shutdown();
         }
         log.info("container destroyed, {}", this.toString());
     }
 
-    @Override
+    @Override// 实现自 SmartLifecycle 接口
     public boolean isAutoStartup() {
         return true;
     }
@@ -229,15 +244,18 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
 
     @Override
     public void start() {
+        // 如果已经启动，则抛出 IllegalStateException 异常
         if (this.isRunning()) {
             throw new IllegalStateException("container already running. " + this.toString());
         }
 
+        // 启动 DefaultMQPushConsumer
         try {
             consumer.start();
         } catch (MQClientException e) {
             throw new IllegalStateException("Failed to start RocketMQ push consumer", e);
         }
+        // 标记已经启动
         this.setRunning(true);
 
         log.info("running container: {}", this.toString());
@@ -245,15 +263,18 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
 
     @Override
     public void stop() {
+        // 必须在运行中
         if (this.isRunning()) {
+            // 关闭 DefaultMQPushConsumer
             if (Objects.nonNull(consumer)) {
                 consumer.shutdown();
             }
+            // 标记不在启动
             setRunning(false);
         }
     }
 
-    @Override
+    @Override // 实现自 SmartLifecycle->Lifecycle 接口
     public boolean isRunning() {
         return running;
     }
@@ -262,7 +283,7 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
         this.running = running;
     }
 
-    @Override
+    @Override   // 实现自 SmartLifecycle->Phased 接口
     public int getPhase() {
         // Returning Integer.MAX_VALUE only suggests that
         // we will be the first bean to shutdown and last bean to start
@@ -272,8 +293,10 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
 
     @Override
     public void afterPropertiesSet() throws Exception {
+        // 初始化 DefaultMQPushConsumer 对象
         initRocketMQPushConsumer();
 
+        // 获得 messageType 属性
         this.messageType = getMessageType();
         log.debug("RocketMQ messageType: {}", messageType.getName());
     }
@@ -304,17 +327,20 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
             for (MessageExt messageExt : msgs) {
                 log.debug("received msg: {}", messageExt);
                 try {
+                    // 转换消息
+                    // 执行消费
                     long now = System.currentTimeMillis();
                     rocketMQListener.onMessage(doConvertMessage(messageExt));
                     long costTime = System.currentTimeMillis() - now;
                     log.debug("consume {} cost: {} ms", messageExt.getMsgId(), costTime);
                 } catch (Exception e) {
+                    // 发生异常，返回稍后再消费
                     log.warn("consume message failed. messageExt:{}", messageExt, e);
                     context.setDelayLevelWhenNextConsume(delayLevelWhenNextConsume);
                     return ConsumeConcurrentlyStatus.RECONSUME_LATER;
                 }
             }
-
+            // 返回消费成功
             return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
         }
     }
@@ -324,20 +350,26 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
         @SuppressWarnings("unchecked")
         @Override
         public ConsumeOrderlyStatus consumeMessage(List<MessageExt> msgs, ConsumeOrderlyContext context) {
+            // 遍历 MessageExt 消息
             for (MessageExt messageExt : msgs) {
                 log.debug("received msg: {}", messageExt);
                 try {
+                    // 转换消息
+                    // 执行消费
                     long now = System.currentTimeMillis();
                     rocketMQListener.onMessage(doConvertMessage(messageExt));
                     long costTime = System.currentTimeMillis() - now;
+                    // 打印日志
                     log.info("consume {} cost: {} ms", messageExt.getMsgId(), costTime);
                 } catch (Exception e) {
+                    // 发生异常，设置中断消费一会
                     log.warn("consume message failed. messageExt:{}", messageExt, e);
                     context.setSuspendCurrentQueueTimeMillis(suspendCurrentQueueTimeMillis);
                     return ConsumeOrderlyStatus.SUSPEND_CURRENT_QUEUE_A_MOMENT;
                 }
             }
 
+            // 返回消费成功
             return ConsumeOrderlyStatus.SUCCESS;
         }
     }
@@ -345,14 +377,18 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
 
     @SuppressWarnings("unchecked")
     private Object doConvertMessage(MessageExt messageExt) {
+        // 如果是 MessageExt 类型，直接返回
         if (Objects.equals(messageType, MessageExt.class)) {
             return messageExt;
         } else {
+            // 先将 byte 数组（body），转换成 String 类型
             String str = new String(messageExt.getBody(), Charset.forName(charset));
+            // 如果是 String 类型，直接返回
             if (Objects.equals(messageType, String.class)) {
                 return str;
             } else {
                 // If msgType not string, use objectMapper change it.
+                // 使用 objectMapper 读取，使用 JSON 反序列化，将 String 转换成 messageType 类型
                 try {
                     return objectMapper.readValue(str, messageType);
                 } catch (Exception e) {
@@ -364,19 +400,25 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
     }
 
     private Class getMessageType() {
+        // 获得 Bean 对应的 Class 类名。因为有可能被 AOP 代理过。
         Class<?> targetClass = AopProxyUtils.ultimateTargetClass(rocketMQListener);
+        // 获得接口的 Type 数组
         Type[] interfaces = targetClass.getGenericInterfaces();
         Class<?> superclass = targetClass.getSuperclass();
-        while ((Objects.isNull(interfaces) || 0 == interfaces.length) && Objects.nonNull(superclass)) {
+        while ((Objects.isNull(interfaces) || 0 == interfaces.length) && Objects.nonNull(superclass)) {// 此处，是以父类的接口为准
             interfaces = superclass.getGenericInterfaces();
             superclass = targetClass.getSuperclass();
         }
         if (Objects.nonNull(interfaces)) {
+            // 遍历 interfaces 数组
             for (Type type : interfaces) {
+                // 要求 type 是泛型参数
                 if (type instanceof ParameterizedType) {
                     ParameterizedType parameterizedType = (ParameterizedType) type;
+                    // 要求是 RocketMQListener 接口
                     if (Objects.equals(parameterizedType.getRawType(), RocketMQListener.class)) {
                         Type[] actualTypeArguments = parameterizedType.getActualTypeArguments();
+                        // 取首个元素
                         if (Objects.nonNull(actualTypeArguments) && actualTypeArguments.length > 0) {
                             return (Class) actualTypeArguments[0];
                         } else {
@@ -402,6 +444,7 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
             this.rocketMQMessageListener.accessKey(), this.rocketMQMessageListener.secretKey());
         boolean enableMsgTrace = rocketMQMessageListener.enableMsgTrace();
         if (Objects.nonNull(rpcHook)) {
+            // 创建 DefaultMQPushConsumer 对象
             consumer = new DefaultMQPushConsumer(consumerGroup, rpcHook, new AllocateMessageQueueAveragely(),
                 enableMsgTrace, this.applicationContext.getEnvironment().
                 resolveRequiredPlaceholders(this.rocketMQMessageListener.customizedTraceTopic()));
@@ -414,12 +457,14 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
                     resolveRequiredPlaceholders(this.rocketMQMessageListener.customizedTraceTopic()));
         }
 
+        // 设置其属性
         consumer.setNamesrvAddr(nameServer);
         consumer.setConsumeThreadMax(consumeThreadMax);
         if (consumeThreadMax < consumer.getConsumeThreadMin()) {
             consumer.setConsumeThreadMin(consumeThreadMax);
         }
 
+        // 设置 messageModel 属性
         switch (messageModel) {
             case BROADCASTING:
                 consumer.setMessageModel(org.apache.rocketmq.common.protocol.heartbeat.MessageModel.BROADCASTING);
@@ -431,6 +476,7 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
                 throw new IllegalArgumentException("Property 'messageModel' was wrong.");
         }
 
+        // 设置 selectorType 属性
         switch (selectorType) {
             case TAG:
                 consumer.subscribe(topic, selectorExpression);
@@ -442,6 +488,7 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
                 throw new IllegalArgumentException("Property 'selectorType' was wrong.");
         }
 
+        // 设置 messageListener 属性
         switch (consumeMode) {
             case ORDERLY:
                 consumer.setMessageListener(new DefaultMessageListenerOrderly());
@@ -453,6 +500,7 @@ public class DefaultRocketMQListenerContainer implements InitializingBean,
                 throw new IllegalArgumentException("Property 'consumeMode' was wrong.");
         }
 
+        // 如果实现了 RocketMQPushConsumerLifecycleListener 接口，则调用 prepareStart 方法，执行准备初始化的方法
         if (rocketMQListener instanceof RocketMQPushConsumerLifecycleListener) {
             ((RocketMQPushConsumerLifecycleListener) rocketMQListener).prepareStart(consumer);
         }
